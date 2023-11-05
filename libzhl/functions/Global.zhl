@@ -1,0 +1,49 @@
+/*
+"\x55\x8B\xEC\x83\xE4\x00\x51\xA1\x00\x00\x00\x00\x53\x56\x57\x83",
+	//mask
+	"xxxxx?xx????xxxx",
+*/
+
+{{
+#include <windows.h>
+#include <string>
+#include <vector>
+#include <set>
+#include <map>
+#include <functional>
+#include <deque>
+#include <cstdarg>
+#include <unordered_map>
+#include <cmath>
+#include <queue>
+#include <cstdint>
+#include <bitset>
+#include <rttidata.h>
+#undef LoadImage
+
+#ifndef M_PI
+        #define M_PI 3.14159265358979323846
+#endif
+
+}}
+//=================================================================================================================
+// This block will be copied right afterwards, unless it "depends" on specific structures
+// in which case these structures will be declared first
+// This is useful if you have something like a 2D vector struct and want some predefined vectors for convenience purposes
+
+// struct GlobalConst // comment this line out and uncomment the line below if this block requires specific structures (don't forget to replace the list of dependencies with your own)
+{{	
+// For address "literals" in LibZHL, it's best to define them here to avoid clashing with the parser more than needed
+"a1(????????)83ec10803d????????00":
+reference void* g_fdkhdfkasjdhsa;
+}}
+
+struct Stas {
+    int a : 0x0;
+    int b : 0x4;
+    int c: 0x8;
+} : 0xc;
+
+struct GlobalPost {
+{{
+}} };
