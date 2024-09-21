@@ -21,11 +21,12 @@ public:
 	ByteBuffer(ByteBuffer&& other);
 	ByteBuffer& operator=(ByteBuffer&& other);
 
-	ByteBuffer& AddByte(char byte);
+	ByteBuffer& AddByte(unsigned char byte, size_t n = 1);
 	ByteBuffer& AddString(const char* s);
 	ByteBuffer& AddZeroes(uint32_t n);
 	ByteBuffer& AddAny(const char* addr, size_t n);
 	ByteBuffer& AddByteBuffer(ByteBuffer const& other);
+	ByteBuffer& AddPointer(void* ptr);
 
 	size_t GetSize() const;
 	char* GetData() const;

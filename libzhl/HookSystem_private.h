@@ -129,7 +129,7 @@ private:
 	const bool _useOffset;
 
 public:
-	VariableDefinition::VariableDefinition(const char* name, const char* sig, void* outvar, bool useValue = true, bool useOffset = false) :
+	VariableDefinition(const char* name, const char* sig, void* outvar, bool useValue = true, bool useOffset = false) :
 		_name(name),
 		_sig(sig),
 		_outVar(outvar),

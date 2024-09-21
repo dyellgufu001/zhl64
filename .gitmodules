@@ -1,6 +1,3 @@
-[submodule "libs/imgui"]
-	path = libs/imgui
-	url = https://github.com/ocornut/imgui
-[submodule "libs/freetype"]
-	path = libs/freetype
-	url = https://gitlab.freedesktop.org/freetype/freetype.git
+[submodule "libs/mINI"]
+	path = libs/mINI
+	url = https://github.com/metayeti/mINI

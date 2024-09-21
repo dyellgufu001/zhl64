@@ -1,17 +1,25 @@
 cmake_minimum_required(VERSION 3.13.0)
 
-set ("CMAKE_CXX_STANDARD" 17)
+set ("CMAKE_CXX_STANDARD" 23)
+set (GAME_DIRECTORY "" CACHE PATH "Path to the root directory of the game")
 set (CMAKE_BUILD_TYPE "Debug")
 
 project (zhl)
 
-find_library(D3D11 d3d11.lib "C:/Program Files (x86)/Windows Kits/10/Lib/10.0.22000.0/um/x64")
+find_library(D3D12 d3d12.lib "C:/Program Files (x86)/Windows Kits/10/Lib/10.0.22000.0/um/x64")
 find_library(DXGI dxgi.lib "C:/Program Files (x86)/Windows Kits/10/Lib/10.0.22000.0/um/x64")
 find_library(D2D1 d2d1.lib "C:/Program Files (x86)/Windows Kits/10/Lib/10.0.22000.0/um/x64")
 
 include_directories("${CMAKE_SOURCE_DIR}/include" "${CMAKE_SOURCE_DIR}/libzhl" 
     "${CMAKE_SOURCE_DIR}/libs/imgui" "${CMAKE_SOURCE_DIR}/libs/imgui/misc/freetype" 
-    "${CMAKE_SOURCE_DIR}/libs/imgui/backends" )
+    "${CMAKE_SOURCE_DIR}/libs/imgui/backends" "${CMAKE_SOURCE_DIR}/libs/mINI/src/mini")
+
+# Zydis
+option(ZYDIS_BUILD_TOOLS "" OFF)
+option(ZYDIS_BUILD_EXAMPLES "" OFF)
+option(ZYDIS_BUILD_DOXYGEN "" OFF)
+add_subdirectory("libs/zydis")
+target_compile_options("Zydis" PUBLIC "/MD")
 
 # ANTLR
 option(WITH_STATIC_CRT "" OFF)
@@ -32,10 +40,15 @@ target_compile_options(antlr4_shared PUBLIC "/wd4100" "/wd4244" "/wd4251" "/wd42
 
 add_custom_command(TARGET zhlparser POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE_DIR:antlr4_shared>/antlr4-runtime.dll" "$<TARGET_FILE_DIR:zhlparser>")
 
+FILE(GLOB LAUNCHER_SRC ${CMAKE_SOURCE_DIR}/launcher/*.cpp)
+add_executable(launcher ${LAUNCHER_SRC})
+target_link_libraries(launcher PRIVATE ImageHlp)
+
 # dsound
-FILE(GLOB LAUNCHER_SRC "${CMAKE_SOURCE_DIR}/launcher/*.cpp")
-add_library(xinput9_1_0 SHARED ${LAUNCHER_SRC})
-target_compile_options(xinput9_1_0 PUBLIC "/MD" "/wd4996")
+FILE(GLOB LOADER_SRC "${CMAKE_SOURCE_DIR}/loader/*.cpp")
+add_library(zhlLoader SHARED ${LOADER_SRC})
+target_compile_options(zhlLoader PUBLIC "/MD" "/wd4996")
+target_link_libraries(zhlLoader PRIVATE libzhl)
 
 # IsaacRepentance.h/.cpp
 FILE(GLOB ZHL_FILES ${CMAKE_SOURCE_DIR}/libzhl/functions/*.zhl)
@@ -43,7 +56,9 @@ FILE(GLOB ZHL_FILES ${CMAKE_SOURCE_DIR}/libzhl/functions/*.zhl)
 
 # libzhl
 FILE(GLOB ZHL_SRC ${CMAKE_SOURCE_DIR}/libzhl/*.cpp ${CMAKE_SOURCE_DIR}/libzhl/*.h)
+# FILE(GLOB ZHL_IXX_SRC ${CMAKE_SOURCE_DIR}/libzhl/*.ixx)
 add_library(libzhl SHARED ${ZHL_SRC})
+
 target_compile_options(libzhl PUBLIC "/MD" "/wd4251" "/wd4996")
 
 # ImGUI
@@ -102,7 +117,7 @@ target_compile_definitions(freetype PRIVATE FT2_BUILD_LIBRARY PRIVATE DLL_EXPORT
 FILE(GLOB IMGUI_SRC ${CMAKE_SOURCE_DIR}/libs/imgui/*.cpp)
 FILE(GLOB IMGUI_BACKENDS_DIR ${CMAKE_SOURCE_DIR}/libs/imgui/backends/)
 set(IMGUI_BACKENDS_DIR ${CMAKE_SOURCE_DIR}/libs/imgui/backends/)
-add_library(imgui ${IMGUI_SRC} ${CMAKE_SOURCE_DIR}/libs/imgui/misc/freetype/imgui_freetype.h ${CMAKE_SOURCE_DIR}/libs/imgui/misc/freetype/imgui_freetype.cpp ${IMGUI_BACKENDS_DIR}/imgui_impl_dx11.cpp ${IMGUI_BACKENDS_DIR}/imgui_impl_dx11.h ${IMGUI_BACKENDS_DIR}/imgui_impl_win32.h ${IMGUI_BACKENDS_DIR}/imgui_impl_win32.cpp)
+add_library(imgui ${IMGUI_SRC} ${CMAKE_SOURCE_DIR}/libs/imgui/misc/freetype/imgui_freetype.h ${CMAKE_SOURCE_DIR}/libs/imgui/misc/freetype/imgui_freetype.cpp ${IMGUI_BACKENDS_DIR}/imgui_impl_dx12.cpp ${IMGUI_BACKENDS_DIR}/imgui_impl_dx12.h ${IMGUI_BACKENDS_DIR}/imgui_impl_win32.h ${IMGUI_BACKENDS_DIR}/imgui_impl_win32.cpp)
 target_include_directories(imgui PUBLIC "${CMAKE_SOURCE_DIR}/libs/freetype/include")
 target_compile_options(imgui PUBLIC "/MD")
 target_compile_definitions(imgui PUBLIC IMGUI_ENABLE_FREETYPE)
@@ -119,17 +134,27 @@ endforeach()
 add_library(zhlModTest SHARED ${MODTEST_SRC})
 target_compile_options(zhlModTest PUBLIC "/MD" "/wd4251" "/wd4996")
 
-target_link_libraries(zhlModTest libzhl imgui freetype)
+target_link_libraries(libzhl "Zydis")
+target_link_libraries(zhlModTest libzhl imgui freetype "Zydis")
 
 # D3D11 test env
-FILE(GLOB TESTENV_SRC "${CMAKE_SOURCE_DIR}/testenv/*.cpp")
-add_executable(testenv ${TESTENV_SRC})
-target_link_options(testenv PUBLIC "/subsystem:windows")
-target_include_directories(testenv PUBLIC "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22000.0/um")
-target_link_libraries(testenv D3D11 DXGI D2D1)
+# FILE(GLOB TESTENV_SRC "${CMAKE_SOURCE_DIR}/testenv/*.cpp")
+# add_executable(testenv ${TESTENV_SRC})
+# target_link_options(testenv PUBLIC "/subsystem:windows")
+# target_include_directories(testenv PUBLIC "C:/Program Files (x86)/Windows Kits/10/Include/10.0.22000.0/um")
+# target_link_libraries(testenv D3D11 DXGI D2D1)
+
+if(NOT GAME_DIRECTORY STREQUAL "")
+    message (STATUS "Files will be installed to " ${GAME_DIRECTORY})
+    add_custom_command(TARGET zhlLoader POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE_DIR:zhlLoader>/zhlLoader.dll" "${GAME_DIRECTORY}")
+    add_custom_command(TARGET libzhl POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE_DIR:libzhl>/libzhl.dll" "${GAME_DIRECTORY}")
+    add_custom_command(TARGET zhlModTest POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE_DIR:zhlModTest>/zhlModTest.dll" "${GAME_DIRECTORY}")
+    add_custom_command(TARGET launcher POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE_DIR:launcher>/launcher.exe" "${GAME_DIRECTORY}")
+endif()
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
-set_target_properties(antlr4_shared imgui freetype PROPERTIES FOLDER "External Libs")
+set_target_properties(antlr4_shared imgui freetype Zycore Zydis PROPERTIES FOLDER "External Libs")
 set_target_properties(zhlparser libzhl PROPERTIES FOLDER "libzhl")
-set_target_properties(xinput9_1_0 zhlModTest PROPERTIES FOLDER "ModTest")
-set_target_properties(testenv PROPERTIES FOLDER "Test Environment")
+set_target_properties(zhlLoader launcher PROPERTIES FOLDER "launcher")
+set_target_properties(zhlModTest PROPERTIES FOLDER "ModTest")
+# set_target_properties(testenv PROPERTIES FOLDER "Test Environment")

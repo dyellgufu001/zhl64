@@ -40,18 +40,37 @@ public:
 //=================================================================================================
 // static_assert(std::is_class_v<_classname>);
 // static_assert(std::is_member_function_pointer_v<decltype(_classname::_name)>); 
+//#define _DEFINE_METHOD_HOOK1(_id, _classname, _name, _priority, _type) \
+//	namespace { namespace Hook_##_id { \
+//		static_assert(std::is_class_v<_classname>, "Cannot HOOK_METHOD on something that is not a class"); \
+//		static_assert(std::is_member_function_pointer_v<decltype(&_classname::_name)>, "Cannot HOOK_METHOD on something that is not a method (use HOOK_STATIC for static methods)"); \
+//		static void *internalSuper = NULL; \
+//		struct wrapper : public _classname { \
+//			auto hook _type ; \
+//			auto super _type ; \
+//		}; \
+//		static FunctionHook hookObj(#_classname "::" #_name, typeid(auto (_classname::*) _type), &wrapper::hook, &internalSuper, _priority); \
+//	} } \
+//	auto __declspec(naked) Hook_##_id :: wrapper::super _type {__asm jmp internalSuper} \
+//	auto Hook_##_id ::wrapper::hook _type
+//
+//#define _DEFINE_METHOD_HOOK0(_id, _classname, _name, _priority, _type) _DEFINE_METHOD_HOOK1(_id, _classname, _name, _priority, _type)
+
 #define _DEFINE_METHOD_HOOK1(_id, _classname, _name, _priority, _type) \
 	namespace { namespace Hook_##_id { \
-		static_assert(std::is_class_v<_classname>, "Cannot HOOK_METHOD on something that is not a class"); \
-		static_assert(std::is_member_function_pointer_v<decltype(&_classname::_name)>, "Cannot HOOK_METHOD on something that is not a method (use HOOK_STATIC for static methods)"); \
 		static void *internalSuper = NULL; \
 		struct wrapper : public _classname { \
+			using _callsign = auto (wrapper::*) _type; \
 			auto hook _type ; \
-			auto super _type ; \
+			template <typename... Args> decltype((std::declval<wrapper>().*(std::declval<_callsign>()))(std::declval<Args>()...)) super(Args&&... args) { \
+				_callsign mfp = &wrapper::hook; \
+				uintptr_t *mfpAsUintPtr = reinterpret_cast<uintptr_t*>(&mfp); \
+				*mfpAsUintPtr = reinterpret_cast<uintptr_t&>(internalSuper) + (*mfpAsUintPtr % 2 == 1 ? 1 : 0); \
+				return (this->*mfp)(std::forward<Args>(args)...); \
+			} \
 		}; \
-		static FunctionHook hookObj(#_classname "::" #_name, typeid(auto (_classname::*) _type), &wrapper::hook, &internalSuper, _priority); \
+		static FunctionHook hookObj = FunctionHook(#_classname "::" #_name, typeid(auto (_classname::*) _type), &wrapper::hook, &internalSuper, _priority); \
 	} } \
-	auto __declspec(naked) Hook_##_id :: wrapper::super _type {__asm jmp internalSuper} \
 	auto Hook_##_id ::wrapper::hook _type
 
 #define _DEFINE_METHOD_HOOK0(_id, _classname, _name, _priority, _type) _DEFINE_METHOD_HOOK1(_id, _classname, _name, _priority, _type)

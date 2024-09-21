@@ -358,7 +358,7 @@ namespace MologieDetours
 			trampoline_ = new uint8_t[MOLOGIE_DETOURS_DETOUR_SIZE];
 #elif defined(__amd64__) || defined(_M_X64)
 			trampoline_ = new uint8_t[12];
-			if ((((uintptr_t)trampoline_) & ((uintptr_t)pSource_) & 0xFFFFFFFF00000000) != 0) {
+			if (((((uintptr_t)trampoline_) | ((uintptr_t)pSource_)) & 0xFFFFFFFF00000000) != 0) {
 				detourSize = 12;
 			}
 #endif
@@ -439,6 +439,7 @@ namespace MologieDetours
 			*reinterpret_cast<address_pointer_type>(trampoline_ + 1) = reinterpret_cast<address_type>(pDetour_) - reinterpret_cast<address_type>(trampoline_) - MOLOGIE_DETOURS_DETOUR_SIZE;
 			#elif defined(__amd64__) || defined(_M_X64)
 			// TODO: Add code to check upper 32-bits of trampoline & detour to see if they are the same, if they are you can perform an E9 relative jmp like above. If not this absolute jump still works, just the CPU hates you.
+			delete[] trampoline_;
 			trampoline_ = new uint8_t[12];
 			//printf("TRAMPOLINE AT: 0x%016llx, DETOUR: 0x%016llx, Target Func: 0x%016llx, Orig Backup: 0x%016llx\n", reinterpret_cast<address_type>(trampoline_), reinterpret_cast<address_type>(pDetour_), reinterpret_cast<address_type>(targetFunction), reinterpret_cast<address_type>(backupOriginalCode_));
 			trampoline_[0] = 0x48; trampoline_[1] = 0xB8; // mov imm64 into RAX
