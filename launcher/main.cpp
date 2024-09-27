@@ -162,13 +162,18 @@ int main() {
         return -1;
     }
 
-    DWORD result = ResumeThread(procInfo.hThread);
-    if (result == -1) {
-        printf("sorry fucky ou\n");
-        return -1;
-    }
+    if (!config.suspend) {
+        printf("resuming\n");
+        DWORD result = ResumeThread(procInfo.hThread);
+        if (result == -1) {
+            printf("sorry fucky ou\n");
+            return -1;
+        }
 
-    printf("resumed\n");
+        printf("resumed\n");
+    } else {
+        printf("not resuming\n");
+    }
     
     return 0;
 }

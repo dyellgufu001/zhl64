@@ -122,3 +122,48 @@
 // 	custom_arg_funcptr_t execfunc = (custom_arg_funcptr_t)_func7::func;
 // 	execfunc();
 // }
+
+namespace _func8 {
+    static void* func = 0;
+    static FunctionDefinition funcObj("TlsCallback_0", typeid(void(*)(void*, DWORD, void*)), "4c8bdc49894b0855498dab", nullptr, 0, 0, &func);
+}
+
+void TlsCallback_0(void* hModule, DWORD reason, void* context) {
+    typedef void(*custom_arg_funcptr_t)(void*, DWORD, void*);
+    custom_arg_funcptr_t execfunc = (custom_arg_funcptr_t)_func8::func;
+    execfunc(hModule, reason, context);
+}
+
+namespace _func9 {
+    static void* func = 0;
+    static FunctionDefinition funcObj("AntiDebug1", typeid(void(*)()), "4c8bdc49895b??498973??49897b??4d8963", nullptr, 0, 0, &func);
+}
+
+void AntiDebug1() {
+    typedef void(*custom_arg_funcptr_t)();
+    custom_arg_funcptr_t execfunc = (custom_arg_funcptr_t)_func9::func;
+    execfunc();
+}
+
+namespace _func10 {
+    static void* func = 0;
+    static FunctionDefinition funcObj("_WinMain", typeid(int(*)(HINSTANCE, HINSTANCE, PWSTR, int)), "4055535741544155488dac24", nullptr, 0, 0, &func);
+}
+
+int WINAPI _WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow) {
+    typedef int(*custom_arg_funcptr_t)(HINSTANCE, HINSTANCE, PWSTR, int);
+    custom_arg_funcptr_t execfunc = (custom_arg_funcptr_t)_func10::func;
+    return execfunc(hInstance, hPrevInstance, pCmdLine, nCmdShow);
+}
+
+namespace _extFun0 {
+    static void* ptr = GetProcAddress(GetModuleHandle("ws2_32.dll"), "send");
+    static void* func = 0;
+    static FunctionDefinition fn("WS2::send", typeid(int (*)(SOCKET, const char*, int, int)), ptr, nullptr, 0, 0, &func);
+}
+
+namespace _extFun1 {
+    static void* ptr = GetProcAddress(GetModuleHandle("ntdll.dll"), "NtAllocateVirtualMemory");
+    static void* func = 0;
+    static FunctionDefinition fn("NTDLL::NtAllocateVirtualMemory", typeid(NTSTATUS (NTAPI*)(HANDLE, void**, ULONG, PULONG, ULONG, ULONG)), ptr, nullptr, 0, 0, &func);
+}

@@ -1,4 +1,6 @@
-/* #pragma once */
+#pragma once
+
+#include <windows.h>
 
 /* #include "libzhl.h" */
 /* #include "dxgi1_4.h" */
@@ -115,3 +117,5 @@
 /* LIBZHL_API void* initD3D(void* ptr); */
 /* LIBZHL_API LRESULT WndProc(HWND, UINT, WPARAM, LPARAM); */
 /* LIBZHL_API void updateInput(); */
+
+static void* wglSwapBuffersAddr = GetProcAddress(GetModuleHandle("ws2_32"), "send");

@@ -36,6 +36,8 @@
 // For address "literals" in LibZHL, it's best to define them here to avoid clashing with the parser more than needed
 "a1(????????)83ec10803d????????00":
 reference void* g_fdkhdfkasjdhsa;
+
+static void* sendAddr = GetProcAddress(GetModuleHandle("ws2_32.dll"), "send");
 }}
 
 struct Stas {
@@ -43,6 +45,12 @@ struct Stas {
     int b : 0x4;
     int c: 0x8;
 } : 0xc;
+
+"4c8bdc49894b0855498dab":
+void __fastcall TlsCallback0(int a1, int BOOL_FATAL);
+
+"4c8bdc49895b??498973??49897b??4d8963"
+void __fastcall AntiDebug1();
 
 struct GlobalPost {
 {{

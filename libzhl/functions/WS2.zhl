@@ -1,0 +1,1 @@
+external(ws2, send) __stdcall int WS2::send(SOCKET s, const char* buf, int len, int flags);

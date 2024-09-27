@@ -10,6 +10,7 @@ struct Config {
     std::string path = "config.ini";
     std::string exePath;
     std::string cliArgs;
+    bool suspend;
 
     void Init() {
         mINI::INIFile iniFile(path);
@@ -17,6 +18,8 @@ struct Config {
         if (!fs::exists(path)) {
             ini["config"]["ExePath"] = "GameClientApp.exe";
             ini["config"]["CliArgs"] = "--BNetServer=bnet-emu.fish:1119";
+            ini["config"]["Suspend"] = "0";
+            
             iniFile.generate(ini, false);
         }
 
@@ -24,6 +27,7 @@ struct Config {
 
         exePath = std::string(ini["config"]["ExePath"]);
         cliArgs = std::string(ini["config"]["CliArgs"]);
+        suspend = std::string(ini["config"]["Suspend"]) == "1";
     }
 
     bool Write(const char* category, const char* field, const char* value) {
@@ -35,6 +39,7 @@ struct Config {
     void Save() {
         Write("config", "ExePath", exePath.c_str());
         Write("config", "CliArgs", cliArgs.c_str());
+        Write("config", "Suspend", suspend ? "1" : "0");
     }
 };
 
