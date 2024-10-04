@@ -156,6 +156,16 @@ int WINAPI _WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     return execfunc(hInstance, hPrevInstance, pCmdLine, nCmdShow);
 }
 
+namespace _func11 {
+    static void* func = 0;
+    static FunctionDefinition funcObj("CrashFunction", typeid(bool(*)(void*, void*)), "405657b878800000", nullptr, 0, 0, &func);
+}
+
+namespace _func12 {
+    static void* func = 0;
+    static FunctionDefinition funcObj("SomeAntiDebug", typeid(void(*)()), "405557488d6c24??4881ecc800000055", nullptr, 0, 0, &func);
+}
+
 namespace _extFun0 {
     static void* ptr = GetProcAddress(GetModuleHandle("ws2_32.dll"), "send");
     static void* func = 0;

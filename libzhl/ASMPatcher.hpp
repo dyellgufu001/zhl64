@@ -87,8 +87,8 @@ public:
 	void FlatPatch(void* at, const char* with, size_t len = 0, bool nopRest = false);
 
 	static ptrdiff_t JumpOffset(const void* next, const void* target);
-	static std::unique_ptr<char[]> EncodeJump(const void* at, const void* target);
-	static void* EncodeAndWriteJump(void* at, const void* target);
+	static std::unique_ptr<char[]> EncodeJump(const void* at, const void* target, bool absolute);
+	static void* EncodeAndWriteJump(void* at, const void* target, size_t jumpLen, bool absolute);
 	static std::unique_ptr<char[]> EncodeCondJump(CondJumps cond, const void* at, const void* target);
 
 	static void SetExecutable(char* text);
@@ -223,10 +223,21 @@ public:
 			XMM6 = 1 << 14,
 			XMM7 = 1 << 15,
 			XMM_REGISTERS = XMM0 | XMM1 | XMM2 | XMM3 | XMM4 | XMM5 | XMM6 | XMM7,
-			ALL = GP_REGISTERS | XMM_REGISTERS
+                        R8 =  1 << 16,
+                        R9 =  1 << 17,
+                        R10 = 1 << 18,
+                        R11 = 1 << 19,
+                        R12 = 1 << 20,
+                        R13 = 1 << 21,
+                        R14 = 1 << 22,
+                        R15 = 1 << 23,
+                        X64_REGISTERS = R8 | R9 | R10 | R11 | R12 | R13 | R14 | R15,
+                        GP_REGISTERS_STACKLESS_X64 = GP_REGISTERS_STACKLESS | X64_REGISTERS,
+                        GP_REGISTERS_X64 = GP_REGISTERS | X64_REGISTERS,
+			ALL = GP_REGISTERS | XMM_REGISTERS | X64_REGISTERS
 		};
 
-		SavedRegisters(uint32_t mask, bool shouldRestore);
+		SavedRegisters(uint64_t mask, bool shouldRestore);
 		~SavedRegisters();
 
 	private:
@@ -234,16 +245,16 @@ public:
 		friend __declspec(dllexport) int InitZHL();
 
 		void Restore();
-		uint32_t GetMask() const;
+		uint64_t GetMask() const;
 
 		bool _shouldRestore;
 		bool _restored = false;
-		uint32_t _mask;
+		uint64_t _mask;
 
 		static void _Init();
-		static std::map<uint32_t, ByteBuffer> _RegisterPushMap;
-		static std::map<uint32_t, ByteBuffer> _RegisterPopMap;
-		static std::array<uint32_t, 16> _RegisterOrder;
+		static std::map<uint64_t, ByteBuffer> _RegisterPushMap;
+		static std::map<uint64_t, ByteBuffer> _RegisterPopMap;
+		static std::array<uint64_t, 24> _RegisterOrder;
 	};
 
 	enum class Registers {
@@ -468,12 +479,14 @@ private:
 
 	class LIBZHL_API ASMInternalCall : public ASMNode {
 	public:
-		ASMInternalCall(void* target);
-		std::unique_ptr<char[]> ToASM(void* at) const override;
-		size_t Length() const override;
+            ASMInternalCall(void* target);
+            std::unique_ptr<char[]> ToASM(void* at) const override;
+            size_t Length() const override;
 
 	private:
-		void* _target;
+            void* _target;
+            size_t _length;
+            bool _absolute;
 	};
 
 	friend __declspec(dllexport) int InitZHL();

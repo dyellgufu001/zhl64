@@ -624,22 +624,22 @@ namespace MologieDetours
                         uint8_t* relocJmp = baseNew + size + 5;
                         relocJmp[0] = 0xE9;
                         *reinterpret_cast<uint32_t*>(relocJmp + 1) = (uint32_t) ((baseOld - (baseNew + 10)) + originalJmpOffset);
-
+                        
                         // Modify jmp to go to second jmp
                         *reinterpret_cast<uint8_t*>(pbCurOp  + offset) = (uint8_t) remainingInstructions;
 					}
 #if defined(MOLOGIE_DETOURS_HDE_64)
 					if((hs.flags & F_IMM32))
-					{
+                                            {
                         // Attempt to recompute relative jumps (might not work)
                         if(hs.opcode != 0xE9 && hs.opcode != 0xE8 && hs.opcode != 0x0F)
                             throw DetourRelocationException("The target function starts with a relative jmp instruction which can not be patched (is not E9/E8/0F).");
 
                         // TODO: Need to check delta size, if it's larger than a 32-bit jump we'd need to rewrite this code to an absolute jmp rather than this.
                         // TODO: If delta is too big we'll have to allocate more space for that.
-						if ((((uintptr_t)baseOld) & ((uintptr_t)baseNew) & 0xFFFFFFFF00000000) != 0) {
-							throw DetourRelocationException("Target relocation cannot be expressed as rel32 and is more than 32-bits away");
-						}
+                        if ((((uintptr_t)baseOld) & ((uintptr_t)baseNew) & 0xFFFFFFFF00000000) != 0) {
+                            throw DetourRelocationException("Target relocation cannot be expressed as rel32 and is more than 32-bits away");
+                        }
 
                         unsigned char offset = (hs.opcode == 0x0F) ? 2 : 1; // Note, this offset computation doesn't deal with prefixes.
                         *reinterpret_cast<uint32_t*>(pbCurOp  + offset) += delta;

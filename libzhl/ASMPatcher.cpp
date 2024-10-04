@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include <algorithm>
 #include <bitset>
 #include <functional>
 #include <vector>
@@ -115,80 +116,87 @@ void ASMPatcher::FlatPatch(void* at, const char* with, size_t len, bool nopRest)
 }
 
 void* ASMPatcher::Patch(void* at, void* targetPage, const char* with, size_t len) {
-	ZHL::Logger logger;
-	logger.Log("Patching at %p\n", at);
-	bool expected = false;
-	if (!_patching.compare_exchange_strong(expected, true, std::memory_order_acq_rel, std::memory_order_acquire)) {
-		throw std::runtime_error("Parallel patching is not allowed");
-		return nullptr;
-	}
+    ZHL::Logger logger;
+    logger.Log("Patching at %p\n", at);
+    bool expected = false;
+    if (!_patching.compare_exchange_strong(expected, true, std::memory_order_acq_rel, std::memory_order_acquire)) {
+        throw std::runtime_error("Parallel patching is not allowed");
+        return nullptr;
+    }
 
-	// void* targetPage = GetAllocPage(with, true);
-	ProtectionGuard inputGuard(at, PAGE_EXECUTE_READWRITE);
-	ProtectionGuard outputGuard(targetPage, PAGE_READWRITE, PAGE_EXECUTE_READWRITE);
+    // void* targetPage = GetAllocPage(with, true);
+    ProtectionGuard inputGuard(at, PAGE_EXECUTE_READWRITE);
+    ProtectionGuard outputGuard(targetPage, PAGE_READWRITE, PAGE_EXECUTE_READWRITE);
 
-	ZydisDisassembledInstruction instruction;
-	ZyanStatus status = ZydisDisassembleIntel(MACHINE_MODE, (ZyanU64)at, at, X86_LONGEST_INSTRUCTION_NBYTES, &instruction);
-	if (!ZYAN_SUCCESS(status)) {
-		throw std::runtime_error("Unable to properly decode instruction at which you intend to patch");
-	}
+    ZydisDisassembledInstruction instruction;
+    ZyanStatus status = ZydisDisassembleIntel(MACHINE_MODE, (ZyanU64)at, at, X86_LONGEST_INSTRUCTION_NBYTES, &instruction);
+    if (!ZYAN_SUCCESS(status)) {
+        throw std::runtime_error("Unable to properly decode instruction at which you intend to patch");
+    }
 
-	// Jump fits in neatly
-	if (instruction.info.length == 5) {
-		logger.Log("Nothing to rewrite\n");
-	}
-	// Jump does not override whole instruction, nop extra bytes
-	else if (instruction.info.length > 5) {
-		logger.Log("Instruction too long, noping the end\nStart at %p, for %d bytes\n", (char*)at + 5, instruction.info.length - 5);
-		memset((char*)at + 5, 0x90, instruction.info.length - 5);
-	}
-	// Jump overrides other instructions, nop them properly
-	else {
-		logger.Log("Instruction too short, multiple nops required\n");
-		// From the address at which we write the jump, decode every instruction until we've moved at least five bytes.
-		// At this point, the first instruction after the five bytes mark is the next valid instruction.
-		// Rewrite the first five bytes as the jump, and nop the rest.
-		//
-		// In short: search for the next valid instruction after the five bytes mark.
-		// Nope everything from five bytes to the beginning of the next instruction.
-		size_t count = instruction.info.length;
-		char* start = (char*)at + instruction.info.length;
+    bool absolute = false;
+    size_t jumpLen = 5;
+    if ((((uintptr_t)at) & ((uintptr_t)targetPage) & 0xFFFFFFFF00000000) != 0) {
+        absolute = true;
+        jumpLen = 12;
+    }
 
-		while (count < 5) {
-			ZydisDisassembledInstruction ins;
-			ZyanStatus status = ZydisDisassembleIntel(MACHINE_MODE, (ZyanU64)start, start, X86_LONGEST_INSTRUCTION_NBYTES, &ins);
-			if (!ZYAN_SUCCESS(status)) {
-				throw std::runtime_error("Unable to properly decode instruction while trying to instructions that would be overriden by jump");
-			}
-			start = start + ins.info.length;
-			count += ins.info.length;
-		}
+    // Jump fits in neatly
+    if (instruction.info.length == jumpLen) {
+        logger.Log("Nothing to rewrite\n");
+    }
+    // Jump does not override whole instruction, nop extra bytes
+    else if (instruction.info.length > jumpLen) {
+        logger.Log("Instruction too long, noping the end\nStart at %p, for %d bytes\n", (char*)at + jumpLen, instruction.info.length - jumpLen);
+        memset((char*)at + jumpLen, 0x90, instruction.info.length - jumpLen);
+    }
+    // Jump overrides other instructions, nop them properly
+    else {
+        logger.Log("Instruction too short, multiple nops required\n");
+        // From the address at which we write the jump, decode every instruction until we've moved at least five bytes.
+        // At this point, the first instruction after the five bytes mark is the next valid instruction.
+        // Rewrite the first five bytes as the jump, and nop the rest.
+        //
+        // In short: search for the next valid instruction after the five bytes mark.
+        // Nope everything from five bytes to the beginning of the next instruction.
+        size_t count = instruction.info.length;
+        char* start = (char*)at + instruction.info.length;
 
-		// Assertion: the instruction designated by "start" is out of the 5 bytes range
-		// Count is the number of bytes between "at" and "start"
-		// Nop out all but the first five of these bytes.
-		logger.Log("Write %d nops at %p\n", count - 5, (char*)at + 5);
-		memset((char*)at + 5, 0x90, count - 5);
-	}
+        while (count < jumpLen) {
+            ZydisDisassembledInstruction ins;
+            ZyanStatus status = ZydisDisassembleIntel(MACHINE_MODE, (ZyanU64)start, start, X86_LONGEST_INSTRUCTION_NBYTES, &ins);
+            if (!ZYAN_SUCCESS(status)) {
+                throw std::runtime_error("Unable to properly decode instruction while trying to instructions that would be overriden by jump");
+            }
+            start = start + ins.info.length;
+            count += ins.info.length;
+        }
 
-	EncodeAndWriteJump(at, targetPage);
-	size_t textLen = len;
-	if (textLen == 0) {
-		textLen = strlen(with);
-	}
-	memcpy(targetPage, with, textLen);
-	_firstAvailable = (char*)_firstAvailable + textLen;
-	_bytesRemaining -= textLen;
+        // Assertion: the instruction designated by "start" is out of the 5 bytes range
+        // Count is the number of bytes between "at" and "start"
+        // Nop out all but the first five of these bytes.
+        logger.Log("Write %d nops at %p\n", count - jumpLen, (char*)at + jumpLen);
+        memset((char*)at + jumpLen, 0x90, count - jumpLen);
+    }
 
-	expected = true;
-	if (!_patching.compare_exchange_strong(expected, false, std::memory_order_acq_rel, std::memory_order_acquire)) {
-		throw std::runtime_error("Parallel patching is not allowed");
-		return nullptr;
-	}
+    EncodeAndWriteJump(at, targetPage, jumpLen, absolute);
+    size_t textLen = len;
+    if (textLen == 0) {
+        textLen = strlen(with);
+    }
+    memcpy(targetPage, with, textLen);
+    _firstAvailable = (char*)_firstAvailable + textLen;
+    _bytesRemaining -= textLen;
 
-	FlushInstructionCache(GetModuleHandle(NULL), NULL, 0);
+    expected = true;
+    if (!_patching.compare_exchange_strong(expected, false, std::memory_order_acq_rel, std::memory_order_acquire)) {
+        throw std::runtime_error("Parallel patching is not allowed");
+        return nullptr;
+    }
 
-	return targetPage;
+    FlushInstructionCache(GetModuleHandle(NULL), NULL, 0);
+
+    return targetPage;
 }
 
 void* ASMPatcher::AllocPage() {
@@ -286,13 +294,25 @@ ptrdiff_t ASMPatcher::JumpOffset(const void* next, const void* target) {
 	return (intptr_t)target - (intptr_t)next;
 }
 
-std::unique_ptr<char[]> ASMPatcher::EncodeJump(const void* at, const void* target) {
-	void* next = (char*)at + 5;
-	ptrdiff_t offset = JumpOffset(next, target);
-	char* buffer = new char[5];
-	*buffer = 0xE9;
-	memcpy(buffer + 1, &offset, sizeof(ptrdiff_t));
-	return std::unique_ptr<char[]>(buffer);
+std::unique_ptr<char[]> ASMPatcher::EncodeJump(const void* at, const void* target, bool absolute) {
+    if (absolute) {
+        void* next = (char*)at + 12;
+        ptrdiff_t offset = JumpOffset(next, target);
+        char* buffer = new char[12];
+        *buffer = 0x48;
+        buffer[1] = 0xb8;
+        buffer[10] = 0xff;
+        buffer[11] = 0xe0;
+        memcpy(buffer + 2, &target, sizeof(void*));
+        return std::unique_ptr<char[]>(buffer);
+    }
+    
+    void* next = (char*)at + 5;
+    ptrdiff_t offset = JumpOffset(next, target);
+    char* buffer = new char[5];
+    *buffer = 0xE9;
+    memcpy(buffer + 1, &offset, sizeof(ptrdiff_t));
+    return std::unique_ptr<char[]>(buffer);
 }
 
 std::unique_ptr<char[]> ASMPatcher::EncodeCondJump(CondJumps cond, const void* at, const void* target) {
@@ -386,11 +406,11 @@ ASMPatch::ASMPatch(const ByteBuffer& buffer) {
 	AddBytes(buffer);
 }
 
-std::map<uint32_t, ByteBuffer> ASMPatch::SavedRegisters::_RegisterPushMap;
-std::map<uint32_t, ByteBuffer> ASMPatch::SavedRegisters::_RegisterPopMap;
-std::array<uint32_t, 16> ASMPatch::SavedRegisters::_RegisterOrder;
+std::map<uint64_t, ByteBuffer> ASMPatch::SavedRegisters::_RegisterPushMap;
+std::map<uint64_t, ByteBuffer> ASMPatch::SavedRegisters::_RegisterPopMap;
+std::array<uint64_t, 24> ASMPatch::SavedRegisters::_RegisterOrder;
 
-ASMPatch::SavedRegisters::SavedRegisters(uint32_t mask, bool shouldRestore) {
+ASMPatch::SavedRegisters::SavedRegisters(uint64_t mask, bool shouldRestore) {
 	_mask = mask;
 	_shouldRestore = shouldRestore;
 }
@@ -402,7 +422,7 @@ ASMPatch::SavedRegisters::~SavedRegisters() {
 	}
 }
 
-uint32_t ASMPatch::SavedRegisters::GetMask() const {
+uint64_t ASMPatch::SavedRegisters::GetMask() const {
 	return _mask;
 }
 
@@ -415,60 +435,79 @@ void ASMPatch::SavedRegisters::Restore() {
 }
 
 void ASMPatch::SavedRegisters::_Init() {
-	using Reg = Registers;
+    using Reg = Registers;
 
-	_RegisterPushMap[Reg::EAX] = std::move(ByteBuffer().AddString("\x50"));
-	_RegisterPushMap[Reg::ECX] = std::move(ByteBuffer().AddString("\x51"));
-	_RegisterPushMap[Reg::EDX] = std::move(ByteBuffer().AddString("\x52"));
-	_RegisterPushMap[Reg::EBX] = std::move(ByteBuffer().AddString("\x53"));
-	_RegisterPushMap[Reg::ESP] = std::move(ByteBuffer().AddString("\x54"));
-	_RegisterPushMap[Reg::EBP] = std::move(ByteBuffer().AddString("\x55"));
-	_RegisterPushMap[Reg::ESI] = std::move(ByteBuffer().AddString("\x56"));
-	_RegisterPushMap[Reg::EDI] = std::move(ByteBuffer().AddString("\x57"));
-	// For XMM registers, first make place on the stack, because
-	// x86 doesn't allow direct push of an XMM value onto the stack.
-	// Room is made first, then the value is moved from the register
-	// to the stack. 
-	// movupd is used because there is no guarantee that the stack will 
-	// be aligned on a 16-byte boundary (as is expected by movapd).
-	_RegisterPushMap[Reg::XMM0] = std::move(ByteBuffer().AddString("\x83\xEC\x10").AddString("\x66\x0F\x11\x04\x24")); // sub esp, 16 (0x10); movupd [esp], xmm0
-	_RegisterPushMap[Reg::XMM1] = std::move(ByteBuffer().AddString("\x83\xEC\x10").AddString("\x66\x0F\x11\x0C\x24")); // sub esp, 16 (0x10); movupd [esp], xmm1
-	_RegisterPushMap[Reg::XMM2] = std::move(ByteBuffer().AddString("\x83\xEC\x10").AddString("\x66\x0F\x11\x14\x24")); // sub esp, 16 (0x10); movupd [esp], xmm2
-	_RegisterPushMap[Reg::XMM3] = std::move(ByteBuffer().AddString("\x83\xEC\x10").AddString("\x66\x0F\x11\x1C\x24")); // sub esp, 16 (0x10); movupd [esp], xmm3
-	_RegisterPushMap[Reg::XMM4] = std::move(ByteBuffer().AddString("\x83\xEC\x10").AddString("\x66\x0F\x11\x24\x24")); // sub esp, 16 (0x10); movupd [esp], xmm4
-	_RegisterPushMap[Reg::XMM5] = std::move(ByteBuffer().AddString("\x83\xEC\x10").AddString("\x66\x0F\x11\x2C\x24")); // sub esp, 16 (0x10); movupd [esp], xmm5
-	_RegisterPushMap[Reg::XMM6] = std::move(ByteBuffer().AddString("\x83\xEC\x10").AddString("\x66\x0F\x11\x34\x24")); // sub esp, 16 (0x10); movupd [esp], xmm6
-	_RegisterPushMap[Reg::XMM7] = std::move(ByteBuffer().AddString("\x83\xEC\x10").AddString("\x66\x0F\x11\x3C\x24")); // sub esp, 16 (0x10); movupd [esp], xmm7
+    _RegisterPushMap[Reg::EAX] = std::move(ByteBuffer().AddString("\x50"));
+    _RegisterPushMap[Reg::ECX] = std::move(ByteBuffer().AddString("\x51"));
+    _RegisterPushMap[Reg::EDX] = std::move(ByteBuffer().AddString("\x52"));
+    _RegisterPushMap[Reg::EBX] = std::move(ByteBuffer().AddString("\x53"));
+    _RegisterPushMap[Reg::ESP] = std::move(ByteBuffer().AddString("\x54"));
+    _RegisterPushMap[Reg::EBP] = std::move(ByteBuffer().AddString("\x55"));
+    _RegisterPushMap[Reg::ESI] = std::move(ByteBuffer().AddString("\x56"));
+    _RegisterPushMap[Reg::EDI] = std::move(ByteBuffer().AddString("\x57"));
+    // For XMM registers, first make place on the stack, because
+    // x86 doesn't allow direct push of an XMM value onto the stack.
+    // Room is made first, then the value is moved from the register
+    // to the stack. 
+    // movupd is used because there is no guarantee that the stack will 
+    // be aligned on a 16-byte boundary (as is expected by movapd).
+    _RegisterPushMap[Reg::XMM0] = std::move(ByteBuffer().AddString("\x83\xEC\x10").AddString("\x66\x0F\x11\x04\x24")); // sub esp, 16 (0x10); movupd [esp], xmm0
+    _RegisterPushMap[Reg::XMM1] = std::move(ByteBuffer().AddString("\x83\xEC\x10").AddString("\x66\x0F\x11\x0C\x24")); // sub esp, 16 (0x10); movupd [esp], xmm1
+    _RegisterPushMap[Reg::XMM2] = std::move(ByteBuffer().AddString("\x83\xEC\x10").AddString("\x66\x0F\x11\x14\x24")); // sub esp, 16 (0x10); movupd [esp], xmm2
+    _RegisterPushMap[Reg::XMM3] = std::move(ByteBuffer().AddString("\x83\xEC\x10").AddString("\x66\x0F\x11\x1C\x24")); // sub esp, 16 (0x10); movupd [esp], xmm3
+    _RegisterPushMap[Reg::XMM4] = std::move(ByteBuffer().AddString("\x83\xEC\x10").AddString("\x66\x0F\x11\x24\x24")); // sub esp, 16 (0x10); movupd [esp], xmm4
+    _RegisterPushMap[Reg::XMM5] = std::move(ByteBuffer().AddString("\x83\xEC\x10").AddString("\x66\x0F\x11\x2C\x24")); // sub esp, 16 (0x10); movupd [esp], xmm5
+    _RegisterPushMap[Reg::XMM6] = std::move(ByteBuffer().AddString("\x83\xEC\x10").AddString("\x66\x0F\x11\x34\x24")); // sub esp, 16 (0x10); movupd [esp], xmm6
+    _RegisterPushMap[Reg::XMM7] = std::move(ByteBuffer().AddString("\x83\xEC\x10").AddString("\x66\x0F\x11\x3C\x24")); // sub esp, 16 (0x10); movupd [esp], xmm7
 
-	_RegisterPopMap[Reg::EAX] = std::move(ByteBuffer().AddString("\x58"));
-	_RegisterPopMap[Reg::ECX] = std::move(ByteBuffer().AddString("\x59"));
-	_RegisterPopMap[Reg::EDX] = std::move(ByteBuffer().AddString("\x5a"));
-	_RegisterPopMap[Reg::EBX] = std::move(ByteBuffer().AddString("\x5b"));
-	_RegisterPopMap[Reg::ESP] = std::move(ByteBuffer().AddString("\x5c"));
-	_RegisterPopMap[Reg::EBP] = std::move(ByteBuffer().AddString("\x5d"));
-	_RegisterPopMap[Reg::ESI] = std::move(ByteBuffer().AddString("\x5e"));
-	_RegisterPopMap[Reg::EDI] = std::move(ByteBuffer().AddString("\x5f"));
-	// Similar reasoning as above: we cannot pop from the stack into an 
-	// XMM register, so first we move the value from the stack to the 
-	// register, then we free the space used on the stack.
-	// movupd used because no guarantee of alignment.
-	_RegisterPopMap[Reg::XMM0] = std::move(ByteBuffer().AddString("\x66\x0F\x10\x04\x24\x83\xC4\x10")); // movupd xmm0, [esp]; add esp, 128
-	_RegisterPopMap[Reg::XMM1] = std::move(ByteBuffer().AddString("\x66\x0F\x10\x0C\x24\x83\xC4\x10")); // movupd xmm1, [esp]; add esp, 128
-	_RegisterPopMap[Reg::XMM2] = std::move(ByteBuffer().AddString("\x66\x0F\x10\x14\x24\x83\xC4\x10")); // movupd xmm2, [esp]; add esp, 128
-	_RegisterPopMap[Reg::XMM3] = std::move(ByteBuffer().AddString("\x66\x0F\x10\x1C\x24\x83\xC4\x10")); // movupd xmm3, [esp]; add esp, 128
-	_RegisterPopMap[Reg::XMM4] = std::move(ByteBuffer().AddString("\x66\x0F\x10\x24\x24\x83\xC4\x10")); // movupd xmm4, [esp]; add esp, 128
-	_RegisterPopMap[Reg::XMM5] = std::move(ByteBuffer().AddString("\x66\x0F\x10\x2C\x24\x83\xC4\x10")); // movupd xmm5, [esp]; add esp, 128
-	_RegisterPopMap[Reg::XMM6] = std::move(ByteBuffer().AddString("\x66\x0F\x10\x34\x24\x83\xC4\x10")); // movupd xmm6, [esp]; add esp, 128
-	_RegisterPopMap[Reg::XMM7] = std::move(ByteBuffer().AddString("\x66\x0F\x10\x3C\x24\x83\xC4\x10")); // movupd xmm7, [esp]; add esp, 128
+    _RegisterPushMap[Reg::R8]  = std::move(ByteBuffer().AddString("\x41\x50")); // push r8
+    _RegisterPushMap[Reg::R9]  = std::move(ByteBuffer().AddString("\x41\x51")); // push r9
+    _RegisterPushMap[Reg::R10] = std::move(ByteBuffer().AddString("\x41\x52")); // push r10
+    _RegisterPushMap[Reg::R11] = std::move(ByteBuffer().AddString("\x41\x53")); // push r11
+    _RegisterPushMap[Reg::R12] = std::move(ByteBuffer().AddString("\x41\x54")); // push r12
+    _RegisterPushMap[Reg::R13] = std::move(ByteBuffer().AddString("\x41\x55")); // push r13
+    _RegisterPushMap[Reg::R14] = std::move(ByteBuffer().AddString("\x41\x56")); // push r14
+    _RegisterPushMap[Reg::R15] = std::move(ByteBuffer().AddString("\x41\x57")); // push r15
 
-	_RegisterOrder = std::array<uint32_t, 16>({ Reg::EAX, Reg::EBX, Reg::ECX, Reg::EDX, Reg::ESP, Reg::EBP, Reg::ESI, Reg::EDI,
-		Reg::XMM0, Reg::XMM1, Reg::XMM2, Reg::XMM3, Reg::XMM4, Reg::XMM5, Reg::XMM6, Reg::XMM7 });
+    _RegisterPopMap[Reg::EAX] = std::move(ByteBuffer().AddString("\x58"));
+    _RegisterPopMap[Reg::ECX] = std::move(ByteBuffer().AddString("\x59"));
+    _RegisterPopMap[Reg::EDX] = std::move(ByteBuffer().AddString("\x5a"));
+    _RegisterPopMap[Reg::EBX] = std::move(ByteBuffer().AddString("\x5b"));
+    _RegisterPopMap[Reg::ESP] = std::move(ByteBuffer().AddString("\x5c"));
+    _RegisterPopMap[Reg::EBP] = std::move(ByteBuffer().AddString("\x5d"));
+    _RegisterPopMap[Reg::ESI] = std::move(ByteBuffer().AddString("\x5e"));
+    _RegisterPopMap[Reg::EDI] = std::move(ByteBuffer().AddString("\x5f"));
+    // Similar reasoning as above: we cannot pop from the stack into an 
+    // XMM register, so first we move the value from the stack to the 
+    // register, then we free the space used on the stack.
+    // movupd used because no guarantee of alignment.
+    _RegisterPopMap[Reg::XMM0] = std::move(ByteBuffer().AddString("\x66\x0F\x10\x04\x24\x83\xC4\x10")); // movupd xmm0, [esp]; add esp, 128
+    _RegisterPopMap[Reg::XMM1] = std::move(ByteBuffer().AddString("\x66\x0F\x10\x0C\x24\x83\xC4\x10")); // movupd xmm1, [esp]; add esp, 128
+    _RegisterPopMap[Reg::XMM2] = std::move(ByteBuffer().AddString("\x66\x0F\x10\x14\x24\x83\xC4\x10")); // movupd xmm2, [esp]; add esp, 128
+    _RegisterPopMap[Reg::XMM3] = std::move(ByteBuffer().AddString("\x66\x0F\x10\x1C\x24\x83\xC4\x10")); // movupd xmm3, [esp]; add esp, 128
+    _RegisterPopMap[Reg::XMM4] = std::move(ByteBuffer().AddString("\x66\x0F\x10\x24\x24\x83\xC4\x10")); // movupd xmm4, [esp]; add esp, 128
+    _RegisterPopMap[Reg::XMM5] = std::move(ByteBuffer().AddString("\x66\x0F\x10\x2C\x24\x83\xC4\x10")); // movupd xmm5, [esp]; add esp, 128
+    _RegisterPopMap[Reg::XMM6] = std::move(ByteBuffer().AddString("\x66\x0F\x10\x34\x24\x83\xC4\x10")); // movupd xmm6, [esp]; add esp, 128
+    _RegisterPopMap[Reg::XMM7] = std::move(ByteBuffer().AddString("\x66\x0F\x10\x3C\x24\x83\xC4\x10")); // movupd xmm7, [esp]; add esp, 128
+
+    _RegisterPopMap[Reg::R8]  = std::move(ByteBuffer().AddString("\x41\x58")); // pop r8
+    _RegisterPopMap[Reg::R9]  = std::move(ByteBuffer().AddString("\x41\x59")); // pop r9
+    _RegisterPopMap[Reg::R10] = std::move(ByteBuffer().AddString("\x41\x5a")); // pop r10
+    _RegisterPopMap[Reg::R11] = std::move(ByteBuffer().AddString("\x41\x5b")); // pop r11
+    _RegisterPopMap[Reg::R12] = std::move(ByteBuffer().AddString("\x41\x5c")); // pop r12
+    _RegisterPopMap[Reg::R13] = std::move(ByteBuffer().AddString("\x41\x5d")); // pop r13
+    _RegisterPopMap[Reg::R14] = std::move(ByteBuffer().AddString("\x41\x5e")); // pop r14
+    _RegisterPopMap[Reg::R15] = std::move(ByteBuffer().AddString("\x41\x5f")); // pop r15
+
+    _RegisterOrder = std::array<uint64_t, 24>({ Reg::EAX, Reg::EBX, Reg::ECX, Reg::EDX, Reg::ESP, Reg::EBP, Reg::ESI, Reg::EDI,
+            Reg::R8, Reg::R9, Reg::R10, Reg::R11, Reg::R12, Reg::R13, Reg::R14, Reg::R15,
+            Reg::XMM0, Reg::XMM1, Reg::XMM2, Reg::XMM3, Reg::XMM4, Reg::XMM5, Reg::XMM6, Reg::XMM7 });
 }
 
-void* ASMPatcher::EncodeAndWriteJump(void* at, const void* target) {
-	std::unique_ptr<char[]> encoded = EncodeJump(at, target);
-	memcpy(at, encoded.get(), 5);
-	return encoded.get() + 5;
+void* ASMPatcher::EncodeAndWriteJump(void* at, const void* target, size_t jumpLen, bool absolute) {
+    std::unique_ptr<char[]> encoded = EncodeJump(at, target, absolute);
+    memcpy(at, encoded.get(), jumpLen);
+    return encoded.get() + jumpLen;
 }
 
 ASMPatch& ASMPatch::AddBytes(std::string const& bytes) {
@@ -500,10 +539,10 @@ ASMPatch& ASMPatch::AddConditionalRelativeJump(ASMPatcher::CondJumps cond, void*
 }
 
 ASMPatch& ASMPatch::AddInternalCall(void* addr) {
-	std::unique_ptr<ASMNode> ptr(new ASMInternalCall(addr));
-	_size += ptr->Length();
-	_nodes.push_back(std::move(ptr));
-	return *this;
+    std::unique_ptr<ASMNode> ptr(new ASMInternalCall(addr));
+    _size += ptr->Length();
+    _nodes.push_back(std::move(ptr));
+    return *this;
 }
 
 ASMPatch& ASMPatch::AddZeroes(uint32_t n) {
@@ -518,22 +557,22 @@ ASMPatch& ASMPatch::AddZeroes(uint32_t n) {
 }
 
 ASMPatch& ASMPatch::PreserveRegisters(SavedRegisters& registers) {
-	uint32_t mask = registers.GetMask();
+    uint64_t mask = registers.GetMask();
 
-	for (auto iter = SavedRegisters::_RegisterOrder.begin(); iter != SavedRegisters::_RegisterOrder.end(); ++iter) {
-		if (mask & *iter) {
-			AddBytes(SavedRegisters::_RegisterPushMap[*iter]);
-		}
-	}
+    for (auto iter = SavedRegisters::_RegisterOrder.begin(); iter != SavedRegisters::_RegisterOrder.end(); ++iter) {
+        if (mask & *iter) {
+            AddBytes(SavedRegisters::_RegisterPushMap[*iter]);
+        }
+    }
 
-	return *this;
+    return *this;
 }
 
 ASMPatch& ASMPatch::RestoreRegisters(SavedRegisters& registers) {
 	registers.Restore();
 
 	std::ostringstream stream;
-	uint32_t mask = registers.GetMask();
+	uint64_t mask = registers.GetMask();
 	using Reg = SavedRegisters::Registers;
 
 	for (auto iter = SavedRegisters::_RegisterOrder.rbegin(); iter != SavedRegisters::_RegisterOrder.rend(); ++iter) {
@@ -875,8 +914,8 @@ ASMPatch::ASMJump::ASMJump(void* target) : _target(target) {
 }
 
 std::unique_ptr<char[]> ASMPatch::ASMJump::ToASM(void* at) const {
-	std::unique_ptr<char[]> jump = ASMPatcher::EncodeJump(at, _target);
-	return jump;
+    std::unique_ptr<char[]> jump = ASMPatcher::EncodeJump(at, _target, (((uintptr_t)at) & ((uintptr_t)_target) & 0xFFFFFFFF00000000) != 0);
+    return jump;
 }
 
 ASMPatch::ASMZeroes::ASMZeroes(uint32_t n) : _n(n) {
@@ -894,7 +933,7 @@ size_t ASMPatch::ASMZeroes::Length() const {
 }
 
 size_t ASMPatch::ASMJump::Length() const {
-	return 5;
+	return 12;
 }
 
 ASMPatch::ASMCondJump::ASMCondJump(ASMPatcher::CondJumps cond, void* target) : _cond(cond), _target(target) {
@@ -911,19 +950,28 @@ size_t ASMPatch::ASMCondJump::Length() const {
 }
 
 ASMPatch::ASMInternalCall::ASMInternalCall(void* target) : _target(target) {
-
 }
 
+// TODO: fix this shit (and jumps too)
 std::unique_ptr<char[]> ASMPatch::ASMInternalCall::ToASM(void* at) const {
-	std::unique_ptr<char[]> call(new char[5]);
-	call[0] = '\xE8';
-	ptrdiff_t diff = ASMPatcher::JumpOffset((char*)at + 5, _target);
-	memcpy(call.get() + 1, &diff, sizeof(ptrdiff_t));
-	return call;
+    std::unique_ptr<char[]> call(new char[Length()]);
+    call[0] = 0x53;
+    call[1] = 0x48;
+    call[2] = 0xbb;
+    memcpy(call.get() + 3, &_target, sizeof(void*));
+    call[11] = 0xff;
+    call[12] = 0xd3;
+    call[13] = 0x5b;
+    return call;
+    
+    // call[0] = '\xE8';
+    // ptrdiff_t diff = ASMPatcher::JumpOffset((char*)at + 5, _target);
+    // memcpy(call.get() + 1, &diff, sizeof(ptrdiff_t));
+    // return call;
 }
 
 size_t ASMPatch::ASMInternalCall::Length() const {
-	return 5;
+    return 14;
 }
 
 ASMPatch::ASMBytesAny::ASMBytesAny(ByteBuffer const& bytes) : _bytes(bytes) {

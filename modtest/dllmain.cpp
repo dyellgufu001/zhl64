@@ -15,18 +15,14 @@
 HOOK_GLOBAL(AntiDebug1, () -> void, __fastcall) {}
 
 HOOK_GLOBAL(_WinMain, (HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow) -> int, __fastcall) {
-    printf("hi from winmain");
+    printf("hi from winmain\n");
     return super(hInstance, hPrevInstance, pCmdLine, nCmdShow);
 }
 
 MOD_EXPORT int ModInit(int argc, char** argv) {
     printf("x64 zhl is real\n");
         
-    PatchSSL();
-    PatchException1();
-    PatchShellcode();
-    PatchRtdsc();
-    // PatchConditionalJumps();
+    PerformASMPatches();
 
     return 0;
 }

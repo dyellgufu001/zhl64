@@ -6,10 +6,18 @@
 #include "HookSystem.h"
 #include "HookSystem_private.h"
 #include "Log.h"
+#include "ASMPatcher.hpp"
 
 #include <fstream>
 #include <filesystem>
 #include <sstream>
+
+extern "C" __declspec(dllexport) int InitZHL() {
+    ASMPatch::_Init();
+    ASMPatch::SavedRegisters::_Init();
+
+    return 0;
+}
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved)
 {
@@ -50,6 +58,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
 			ExitProcess(1);
 		}
 	}
-	
+
+        InitZHL();
+        
 	return TRUE;
 }
